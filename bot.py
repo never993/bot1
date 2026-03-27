@@ -42,7 +42,7 @@ def init_db():
             channel_id TEXT UNIQUE NOT NULL, user_id TEXT NOT NULL,
             product TEXT NOT NULL, status TEXT DEFAULT 'open',
             created_at TEXT NOT NULL)""")
-        for col in [("users","hwid","TEXT"),("users","expires_at","TEXT")]:
+        for col in [("users","hwid","TEXT"),("users","expires_at","TEXT"),("keys","expires_at","TEXT")]:
             try: db.execute(f"ALTER TABLE {col[0]} ADD COLUMN {col[1]} {col[2]}"); db.commit()
             except: pass
         db.commit()
