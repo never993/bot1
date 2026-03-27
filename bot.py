@@ -15,9 +15,9 @@ DOWNLOAD_URL = "https://github.com/never993/bot1/releases/download/v1.0/SearchHo
 
 # Produtos da loja
 PRODUCTS = {
-    "1_semana":  {"name": "1 Semana",  "price": "R$ 15,00", "days": 7,  "emoji": "📅"},
-    "1_mes":     {"name": "1 Mês",     "price": "R$ 40,00", "days": 30, "emoji": "📆"},
-    "lifetime":  {"name": "Lifetime",  "price": "R$ 80,00", "days": 0,  "emoji": "♾️"},
+    "1_semana":  {"name": "1 Semana",  "price": "R$ 15,00",  "days": 7,  "emoji": "📅"},
+    "1_mes":     {"name": "1 Mês",     "price": "R$ 40,00",  "days": 30, "emoji": "📆"},
+    "lifetime":  {"name": "Lifetime",  "price": "R$ 100,00", "days": 0,  "emoji": "♾️"},
 }
 
 _data_dir = "/app/data" if os.path.isdir("/app/data") else os.path.dirname(os.path.abspath(__file__))
@@ -138,7 +138,7 @@ class LojaView(View):
     async def buy_mes(self, interaction: discord.Interaction, button: Button):
         await abrir_ticket(interaction, "1_mes")
 
-    @discord.ui.button(label="♾️ Lifetime — R$ 80,00",  style=discord.ButtonStyle.primary,   custom_id="buy_lifetime")
+    @discord.ui.button(label="♾️ Lifetime — R$ 100,00", style=discord.ButtonStyle.primary,   custom_id="buy_lifetime")
     async def buy_lifetime(self, interaction: discord.Interaction, button: Button):
         await abrir_ticket(interaction, "lifetime")
 
