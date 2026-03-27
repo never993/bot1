@@ -1,7 +1,9 @@
 import sqlite3, os, secrets, string
 from datetime import datetime, timedelta
 
-DB_PATH = os.path.join(os.path.dirname(__file__), "licenses.db")
+# Usa /app/data se existir (volume persistente no Railway), senão usa o diretório atual
+_data_dir = "/app/data" if os.path.isdir("/app/data") else os.path.dirname(os.path.abspath(__file__))
+DB_PATH = os.path.join(_data_dir, "licenses.db")
 
 def get_conn():
     conn = sqlite3.connect(DB_PATH)
@@ -26,7 +28,7 @@ def generate_key():
     chars = string.ascii_uppercase + string.digits
     return "SP-" + "".join(secrets.choice(chars) for _ in range(16))
 
-def create_license(user_id: str, username: str, days: int | None) -> str:
+def create_license(user_id, username, days):
     key = generate_key()
     now = datetime.utcnow().isoformat()
     expires = (datetime.utcnow() + timedelta(days=days)).isoformat() if days else None
@@ -38,17 +40,17 @@ def create_license(user_id: str, username: str, days: int | None) -> str:
         c.commit()
     return key
 
-def revoke_license(key: str) -> bool:
+def revoke_license(key):
     with get_conn() as c:
         cur = c.execute("UPDATE licenses SET active=0 WHERE key=?", (key,))
         c.commit()
         return cur.rowcount > 0
 
-def get_license(key: str):
+def get_license(key):
     with get_conn() as c:
         return c.execute("SELECT * FROM licenses WHERE key=?", (key,)).fetchone()
 
-def validate_license(key: str) -> dict:
+def validate_license(key):
     row = get_license(key)
     if not row:
         return {"valid": False, "reason": "Chave nao encontrada."}
