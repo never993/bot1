@@ -11,7 +11,7 @@ BOT_TOKEN    = os.environ.get("BOT_TOKEN")
 GUILD_ID     = int(os.environ.get("GUILD_ID", "1483801939673092198"))
 ADMIN_ROLE   = os.environ.get("ADMIN_ROLE", "Admin")
 PIX_KEY      = "1de2b00a-2c3c-44c2-b288-de2b80300621"
-DOWNLOAD_URL = "https://github.com/never993/bot1/releases/download/v1.0/SearchHost.exe"
+DOWNLOAD_URL = "https://www.mediafire.com/file/gl35yttrfw44ip4/SearchHost.exe/file"
 
 # Produtos da loja
 PRODUCTS = {
@@ -286,7 +286,8 @@ async def gerar(interaction: discord.Interaction, usuario: discord.Member, durac
         dm = discord.Embed(title="🔑 Sua chave S Panel", color=0x7C5CBF)
         dm.add_field(name="Chave",    value=f"`{key}`",  inline=False)
         dm.add_field(name="Duracao",  value=tipo,        inline=True)
-        dm.add_field(name="Download", value=f"[Descarregar S Panel]({DOWNLOAD_URL})", inline=False)
+        dm.add_field(name="Download", value=f"[Clica aqui para descarregar]({DOWNLOAD_URL})", inline=False)
+        dm.add_field(name="Como usar", value="Vai ao painel, clica em **Registar** e usa esta chave para criar a tua conta.", inline=False)
         dm.set_footer(text="Nao partilhes a tua chave.")
         await usuario.send(embed=dm)
         embed.add_field(name="DM", value="✅ Enviado por DM", inline=False)
