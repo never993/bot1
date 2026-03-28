@@ -427,7 +427,39 @@ async def info(interaction: discord.Interaction, username: str):
     embed.add_field(name="HWID",   value=f"`{row['hwid'][:16]}...`" if row["hwid"] else "Nao registado", inline=False)
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
-@tree.command(name="stats", description="Estatísticas do painel", guild=discord.Object(id=GUILD_ID))
+@tree.command(name="painel", description="Mostra informações sobre o S Panel", guild=discord.Object(id=GUILD_ID))
+async def painel(interaction: discord.Interaction):
+    cfg = load_config()
+    embed = discord.Embed(
+        title="⚡ S Panel — Free Fire Emulator",
+        description=(
+            "O **S Panel** é o painel mais avançado para **Free Fire no emulador**.\n\n"
+            "**Funcionalidades:**\n"
+            "🎯 **Legit-Bot** — Aimbot color-based indetectável\n"
+            "👁 **Visual** — DLL visual com ESP e wallhack\n"
+            "🛡 **byp4ss** — Limpeza total de logs e rastros\n"
+            "⚙ **Precision** — Otimização de timer, mouse e rede\n\n"
+            "**Compatível com:**\n"
+            "• MSI App Player (BlueStacks)\n"
+            "• Windows 10/11 x64\n\n"
+            f"📥 **[Download]({cfg['download_url']})**"
+        ),
+        color=0x7C5CBF
+    )
+    embed.set_image(url="https://i.imgur.com/SUBSTITUA_PELA_SUA_IMAGEM.png")
+    embed.set_footer(text="S Panel • Compra na loja com /loja")
+    embed.timestamp = datetime.utcnow()
+
+    # Preços
+    prices = "\n".join(
+        f"{p['emoji']} **{p['name']}** — {p['price']}"
+        for p in cfg["products"].values()
+    )
+    embed.add_field(name="💰 Preços", value=prices, inline=False)
+
+    await interaction.response.send_message(embed=embed)
+
+
 async def stats(interaction: discord.Interaction):
     if not is_admin(interaction):
         await interaction.response.send_message("❌ Sem permissao.", ephemeral=True)
