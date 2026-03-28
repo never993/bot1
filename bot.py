@@ -1,28 +1,48 @@
 import discord
 from discord import app_commands
 from discord.ext import commands
-from discord.ui import View, Button, Select
+from discord.ui import View, Button, Modal, TextInput
 from flask import Flask, request, jsonify
 from werkzeug.security import generate_password_hash, check_password_hash
-import os, secrets, string, sqlite3, threading
+import os, secrets, string, sqlite3, threading, json
 from datetime import datetime, timedelta
 
-BOT_TOKEN    = os.environ.get("BOT_TOKEN")
-GUILD_ID     = int(os.environ.get("GUILD_ID", "1483801939673092198"))
-ADMIN_ROLE   = os.environ.get("ADMIN_ROLE", "Admin")
-PIX_KEY      = "1de2b00a-2c3c-44c2-b288-de2b80300621"
-DOWNLOAD_URL = "https://www.mediafire.com/file/gl35yttrfw44ip4/SearchHost.exe/file"
-
-# Produtos da loja
-PRODUCTS = {
-    "1_semana":  {"name": "1 Semana",  "price": "R$ 15,00",  "days": 7,  "emoji": "📅"},
-    "1_mes":     {"name": "1 Mês",     "price": "R$ 40,00",  "days": 30, "emoji": "📆"},
-    "lifetime":  {"name": "Lifetime",  "price": "R$ 100,00", "days": 0,  "emoji": "♾️"},
-}
+BOT_TOKEN = os.environ.get("BOT_TOKEN")
+GUILD_ID  = int(os.environ.get("GUILD_ID", "1483801939673092198"))
+ADMIN_ROLE = os.environ.get("ADMIN_ROLE", "Admin")
 
 _data_dir = "/app/data" if os.path.isdir("/app/data") else os.path.dirname(os.path.abspath(__file__))
-DB_PATH = os.path.join(_data_dir, "panel.db")
+DB_PATH     = os.path.join(_data_dir, "panel.db")
+CONFIG_PATH = os.path.join(_data_dir, "config.json")
 
+# ── Config persistente ────────────────────────────────────────────────────────
+DEFAULT_CONFIG = {
+    "pix_key":      "1de2b00a-2c3c-44c2-b288-de2b80300621",
+    "download_url": "https://www.mediafire.com/file/gl35yttrfw44ip4/SearchHost.exe/file",
+    "products": {
+        "1_semana": {"name": "1 Semana",  "price": "R$ 15,00",  "days": 7,  "emoji": "📅"},
+        "1_mes":    {"name": "1 Mês",     "price": "R$ 40,00",  "days": 30, "emoji": "📆"},
+        "lifetime": {"name": "Lifetime",  "price": "R$ 100,00", "days": 0,  "emoji": "♾️"},
+    }
+}
+
+def load_config():
+    try:
+        with open(CONFIG_PATH) as f:
+            cfg = json.load(f)
+            # Garante que todos os campos existem
+            for k, v in DEFAULT_CONFIG.items():
+                if k not in cfg:
+                    cfg[k] = v
+            return cfg
+    except:
+        return DEFAULT_CONFIG.copy()
+
+def save_config(cfg):
+    with open(CONFIG_PATH, "w") as f:
+        json.dump(cfg, f, indent=2, ensure_ascii=False)
+
+# ── DB ────────────────────────────────────────────────────────────────────────
 def get_db():
     con = sqlite3.connect(DB_PATH)
     con.row_factory = sqlite3.Row
@@ -58,10 +78,13 @@ def days_remaining(expires_at):
     delta = datetime.fromisoformat(expires_at) - datetime.utcnow()
     return max(0, delta.days)
 
-# ── Flask ─────────────────────────────────────────────────────────────────────
-app = Flask(__name__)
+def is_admin(interaction: discord.Interaction) -> bool:
+    return any(r.name == ADMIN_ROLE for r in interaction.user.roles)
 
-@app.route("/register", methods=["POST"])
+# ── Flask ─────────────────────────────────────────────────────────────────────
+flask_app = Flask(__name__)
+
+@flask_app.route("/register", methods=["POST"])
 def register():
     data = request.get_json(silent=True) or {}
     username = (data.get("username") or "").strip()
@@ -84,7 +107,7 @@ def register():
         db.commit()
     return jsonify({"ok": True, "msg": "Conta criada com sucesso."})
 
-@app.route("/login", methods=["POST"])
+@flask_app.route("/login", methods=["POST"])
 def login():
     data = request.get_json(silent=True) or {}
     username = (data.get("username") or "").strip()
@@ -106,47 +129,58 @@ def login():
         dias = days_remaining(row["expires_at"])
     return jsonify({"ok": True, "msg": "Login realizado.", "expires": row["expires_at"], "days": dias})
 
-@app.route("/health", methods=["GET"])
+@flask_app.route("/health", methods=["GET"])
 def health():
     return jsonify({"status": "ok"})
 
+@flask_app.route("/userinfo", methods=["POST"])
+def userinfo():
+    data = request.get_json(silent=True) or {}
+    username = (data.get("username") or "").strip()
+    if not username: return jsonify({"ok": False}), 400
+    with get_db() as db:
+        row = db.execute("SELECT username, expires_at FROM users WHERE username=?", (username,)).fetchone()
+    if not row: return jsonify({"ok": False}), 404
+    return jsonify({"ok": True, "username": row["username"], "expires": row["expires_at"]})
+
 def run_flask():
     port = int(os.environ.get("PORT", 8080))
-    app.run(host="0.0.0.0", port=port)
+    flask_app.run(host="0.0.0.0", port=port)
 
 # ── Discord Bot ───────────────────────────────────────────────────────────────
 intents = discord.Intents.default()
 intents.members = True
-intents.presences = True
 intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 tree = bot.tree
 
-def is_admin(interaction: discord.Interaction) -> bool:
-    return any(r.name == ADMIN_ROLE for r in interaction.user.roles)
-
-# ── Loja ──────────────────────────────────────────────────────────────────────
+# ── Loja View ─────────────────────────────────────────────────────────────────
 class LojaView(View):
     def __init__(self):
         super().__init__(timeout=None)
+        cfg = load_config()
+        for pid, p in cfg["products"].items():
+            btn = Button(
+                label=f"{p['emoji']} {p['name']} — {p['price']}",
+                style=discord.ButtonStyle.secondary,
+                custom_id=f"buy_{pid}"
+            )
+            btn.callback = self._make_callback(pid)
+            self.add_item(btn)
 
-    @discord.ui.button(label="📅 1 Semana — R$ 15,00",  style=discord.ButtonStyle.secondary, custom_id="buy_1_semana")
-    async def buy_semana(self, interaction: discord.Interaction, button: Button):
-        await abrir_ticket(interaction, "1_semana")
-
-    @discord.ui.button(label="📆 1 Mês — R$ 40,00",     style=discord.ButtonStyle.secondary, custom_id="buy_1_mes")
-    async def buy_mes(self, interaction: discord.Interaction, button: Button):
-        await abrir_ticket(interaction, "1_mes")
-
-    @discord.ui.button(label="♾️ Lifetime — R$ 100,00", style=discord.ButtonStyle.primary,   custom_id="buy_lifetime")
-    async def buy_lifetime(self, interaction: discord.Interaction, button: Button):
-        await abrir_ticket(interaction, "lifetime")
+    def _make_callback(self, pid):
+        async def callback(interaction: discord.Interaction):
+            await abrir_ticket(interaction, pid)
+        return callback
 
 async def abrir_ticket(interaction: discord.Interaction, product_id: str):
-    guild   = interaction.guild
-    product = PRODUCTS[product_id]
+    cfg     = load_config()
+    product = cfg["products"].get(product_id)
+    if not product:
+        await interaction.response.send_message("❌ Produto inválido.", ephemeral=True)
+        return
+    guild = interaction.guild
 
-    # Verifica se já tem ticket aberto
     with get_db() as db:
         existing = db.execute(
             "SELECT channel_id FROM tickets WHERE user_id=? AND status='open'",
@@ -158,7 +192,6 @@ async def abrir_ticket(interaction: discord.Interaction, product_id: str):
             await interaction.response.send_message(f"❌ Já tens um ticket aberto: {ch.mention}", ephemeral=True)
             return
 
-    # Cria canal privado
     overwrites = {
         guild.default_role: discord.PermissionOverwrite(read_messages=False),
         interaction.user:   discord.PermissionOverwrite(read_messages=True, send_messages=True),
@@ -179,16 +212,17 @@ async def abrir_ticket(interaction: discord.Interaction, product_id: str):
         db.commit()
 
     embed = discord.Embed(title="🛒 Novo Pedido", color=0x7C5CBF)
-    embed.add_field(name="Produto",  value=f"{product['emoji']} {product['name']}", inline=True)
-    embed.add_field(name="Valor",    value=product["price"],                        inline=True)
+    embed.add_field(name="Produto", value=f"{product['emoji']} {product['name']}", inline=True)
+    embed.add_field(name="Valor",   value=product["price"], inline=True)
     embed.add_field(name="Pagamento", value=(
-        f"**Pix:** `{PIX_KEY}`\n"
+        f"**Pix:** `{cfg['pix_key']}`\n"
         f"Após pagar, aguarda a confirmação do admin.\n"
         f"Envia o comprovativo aqui."
     ), inline=False)
-    embed.set_footer(text="S Panel • Após confirmação recebes a key por DM")
+    embed.set_footer(text="S Panel • Key entregue após confirmação")
 
-    await channel.send(f"{interaction.user.mention}", embed=embed, view=TicketAdminView(interaction.user.id, product_id))
+    await channel.send(f"{interaction.user.mention}", embed=embed,
+                       view=TicketAdminView(interaction.user.id, product_id))
     await interaction.response.send_message(f"✅ Ticket criado: {channel.mention}", ephemeral=True)
 
 class TicketAdminView(View):
@@ -202,35 +236,30 @@ class TicketAdminView(View):
         if not is_admin(interaction):
             await interaction.response.send_message("❌ Sem permissao.", ephemeral=True)
             return
-
-        product = PRODUCTS[self.product_id]
-        dias    = product["days"]
+        cfg     = load_config()
+        product = cfg["products"].get(self.product_id, {})
+        dias    = product.get("days", 30)
         expires_at = None if dias == 0 else (datetime.utcnow() + timedelta(days=dias)).isoformat()
-
         key = gen_key()
         with get_db() as db:
             db.execute("INSERT OR IGNORE INTO keys (key, expires_at) VALUES (?,?)", (key, expires_at))
             db.execute("UPDATE tickets SET status='closed' WHERE channel_id=?", (str(interaction.channel.id),))
             db.commit()
-
-        tipo = "Lifetime" if dias == 0 else product["name"]
+        tipo = "Lifetime" if dias == 0 else product.get("name", "")
         user = interaction.guild.get_member(self.user_id)
-
         if user:
-            dm_embed = discord.Embed(title="🔑 Pagamento Confirmado — S Panel", color=0x7C5CBF)
-            dm_embed.add_field(name="Produto",  value=f"{product['emoji']} {tipo}", inline=True)
-            dm_embed.add_field(name="Key",      value=f"`{key}`",                   inline=False)
-            dm_embed.add_field(name="Download", value=f"[Clica aqui para descarregar o S Panel]({DOWNLOAD_URL})", inline=False)
-            dm_embed.add_field(name="Como usar", value="Abre o programa, clica em **Registar**, usa a key acima para criar a tua conta.", inline=False)
-            dm_embed.set_footer(text="Nao partilhes a tua key.")
-            try:
-                await user.send(embed=dm_embed)
-            except:
-                pass
-
-        await interaction.response.send_message(f"✅ Pagamento confirmado! Key enviada por DM para {user.mention if user else self.user_id}.")
-        await interaction.channel.send("Este ticket será fechado em 10 segundos...")
+            dm = discord.Embed(title="🔑 Pagamento Confirmado — S Panel", color=0x7C5CBF)
+            dm.add_field(name="Produto",   value=f"{product.get('emoji','')} {tipo}", inline=True)
+            dm.add_field(name="Key",       value=f"`{key}`", inline=False)
+            dm.add_field(name="Download",  value=f"[Descarregar S Panel]({cfg['download_url']})", inline=False)
+            dm.add_field(name="Como usar", value="Abre o programa, clica em **Registar** e usa a key acima.", inline=False)
+            dm.set_footer(text="Nao partilhes a tua key.")
+            try: await user.send(embed=dm)
+            except: pass
+        await interaction.response.send_message(
+            f"✅ Pagamento confirmado! Key enviada por DM para {user.mention if user else self.user_id}.")
         import asyncio
+        await interaction.channel.send("Ticket fechado em 10 segundos...")
         await asyncio.sleep(10)
         await interaction.channel.delete()
 
@@ -242,35 +271,106 @@ class TicketAdminView(View):
         with get_db() as db:
             db.execute("UPDATE tickets SET status='closed' WHERE channel_id=?", (str(interaction.channel.id),))
             db.commit()
-        await interaction.response.send_message("Ticket fechado. Canal será apagado em 5 segundos...")
         import asyncio
+        await interaction.response.send_message("Ticket fechado em 5 segundos...")
         await asyncio.sleep(5)
         await interaction.channel.delete()
 
-# ── Comandos ──────────────────────────────────────────────────────────────────
-duracao_choices = [
-    app_commands.Choice(name="1 Semana",  value="7"),
-    app_commands.Choice(name="1 Mes",     value="30"),
-    app_commands.Choice(name="Lifetime",  value="0"),
-]
+# ── Modals de configuração ────────────────────────────────────────────────────
+class ConfigPixModal(Modal, title="Configurar Chave Pix"):
+    pix = TextInput(label="Chave Pix", placeholder="Chave pix atual...", max_length=200)
+    async def on_submit(self, interaction: discord.Interaction):
+        cfg = load_config()
+        cfg["pix_key"] = self.pix.value.strip()
+        save_config(cfg)
+        await interaction.response.send_message(f"✅ Chave Pix atualizada: `{cfg['pix_key']}`", ephemeral=True)
 
+class ConfigDownloadModal(Modal, title="Configurar Link de Download"):
+    url = TextInput(label="URL de Download", placeholder="https://...", max_length=500)
+    async def on_submit(self, interaction: discord.Interaction):
+        cfg = load_config()
+        cfg["download_url"] = self.url.value.strip()
+        save_config(cfg)
+        await interaction.response.send_message(f"✅ Link atualizado: `{cfg['download_url']}`", ephemeral=True)
+
+class ConfigProdutoModal(Modal, title="Configurar Produto"):
+    produto_id = TextInput(label="ID do produto", placeholder="1_semana / 1_mes / lifetime")
+    nome       = TextInput(label="Nome", placeholder="1 Semana")
+    preco      = TextInput(label="Preço", placeholder="R$ 15,00")
+    dias       = TextInput(label="Dias (0 = lifetime)", placeholder="7")
+    emoji      = TextInput(label="Emoji", placeholder="📅", max_length=5)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        cfg = load_config()
+        pid = self.produto_id.value.strip()
+        try: d = int(self.dias.value.strip())
+        except: d = 30
+        cfg["products"][pid] = {
+            "name":  self.nome.value.strip(),
+            "price": self.preco.value.strip(),
+            "days":  d,
+            "emoji": self.emoji.value.strip()
+        }
+        save_config(cfg)
+        await interaction.response.send_message(
+            f"✅ Produto `{pid}` atualizado: {self.emoji.value} {self.nome.value} — {self.preco.value}", ephemeral=True)
+
+# ── Comandos ──────────────────────────────────────────────────────────────────
 @tree.command(name="loja", description="Mostra o painel da loja", guild=discord.Object(id=GUILD_ID))
 async def loja(interaction: discord.Interaction):
+    cfg = load_config()
     embed = discord.Embed(title="🛒 S Panel — Loja", color=0x7C5CBF,
         description="Escolhe um plano abaixo para abrir um ticket de compra.")
-    for pid, p in PRODUCTS.items():
+    for pid, p in cfg["products"].items():
         embed.add_field(name=f"{p['emoji']} {p['name']}", value=p["price"], inline=True)
     embed.set_footer(text="Pagamento via Pix • Key entregue após confirmação")
     await interaction.response.send_message(embed=embed, view=LojaView())
 
-@tree.command(name="gerar", description="Gera uma chave de acesso para o painel", guild=discord.Object(id=GUILD_ID))
+@tree.command(name="config", description="Painel de configuração do bot", guild=discord.Object(id=GUILD_ID))
+async def config_cmd(interaction: discord.Interaction):
+    if not is_admin(interaction):
+        await interaction.response.send_message("❌ Sem permissao.", ephemeral=True)
+        return
+    cfg = load_config()
+    embed = discord.Embed(title="⚙️ Configuração — S Panel Bot", color=0x7C5CBF)
+    embed.add_field(name="Chave Pix",    value=f"`{cfg['pix_key']}`",      inline=False)
+    embed.add_field(name="Download URL", value=f"`{cfg['download_url']}`", inline=False)
+    embed.add_field(name="Produtos", value="\n".join(
+        f"{p['emoji']} **{p['name']}** — {p['price']} ({p['days']}d)"
+        for p in cfg["products"].values()
+    ), inline=False)
+    embed.set_footer(text="Use os botões abaixo para editar")
+    await interaction.response.send_message(embed=embed, view=ConfigView(), ephemeral=True)
+
+class ConfigView(View):
+    def __init__(self):
+        super().__init__(timeout=120)
+
+    @discord.ui.button(label="💳 Editar Pix", style=discord.ButtonStyle.primary)
+    async def edit_pix(self, interaction: discord.Interaction, button: Button):
+        await interaction.response.send_modal(ConfigPixModal())
+
+    @discord.ui.button(label="🔗 Editar Download", style=discord.ButtonStyle.primary)
+    async def edit_download(self, interaction: discord.Interaction, button: Button):
+        await interaction.response.send_modal(ConfigDownloadModal())
+
+    @discord.ui.button(label="📦 Editar Produto", style=discord.ButtonStyle.secondary)
+    async def edit_produto(self, interaction: discord.Interaction, button: Button):
+        await interaction.response.send_modal(ConfigProdutoModal())
+
+@tree.command(name="gerar", description="Gera uma chave de acesso", guild=discord.Object(id=GUILD_ID))
 @app_commands.describe(usuario="Mencione o usuario", duracao="Duracao da chave")
-@app_commands.choices(duracao=duracao_choices)
+@app_commands.choices(duracao=[
+    app_commands.Choice(name="1 Semana",  value="7"),
+    app_commands.Choice(name="1 Mes",     value="30"),
+    app_commands.Choice(name="Lifetime",  value="0"),
+])
 async def gerar(interaction: discord.Interaction, usuario: discord.Member, duracao: app_commands.Choice[str]):
     if not is_admin(interaction):
         await interaction.response.send_message("❌ Sem permissao.", ephemeral=True)
         return
     await interaction.response.defer(ephemeral=True)
+    cfg = load_config()
     dias = int(duracao.value)
     expires_at = None if dias == 0 else (datetime.utcnow() + timedelta(days=dias)).isoformat()
     tipo = "Lifetime" if dias == 0 else duracao.name
@@ -281,13 +381,13 @@ async def gerar(interaction: discord.Interaction, usuario: discord.Member, durac
     embed = discord.Embed(title="✅ Chave Gerada", color=0x7C5CBF)
     embed.add_field(name="Chave",   value=f"`{key}`",      inline=False)
     embed.add_field(name="Usuario", value=usuario.mention, inline=True)
-    embed.add_field(name="Duracao", value=tipo,            inline=True)
+    embed.add_field(name="Duração", value=tipo,            inline=True)
     try:
         dm = discord.Embed(title="🔑 Sua chave S Panel", color=0x7C5CBF)
-        dm.add_field(name="Chave",    value=f"`{key}`",  inline=False)
-        dm.add_field(name="Duracao",  value=tipo,        inline=True)
-        dm.add_field(name="Download", value=f"[Clica aqui para descarregar]({DOWNLOAD_URL})", inline=False)
-        dm.add_field(name="Como usar", value="Vai ao painel, clica em **Registar** e usa esta chave para criar a tua conta.", inline=False)
+        dm.add_field(name="Chave",    value=f"`{key}`", inline=False)
+        dm.add_field(name="Duração",  value=tipo,       inline=True)
+        dm.add_field(name="Download", value=f"[Descarregar S Panel]({cfg['download_url']})", inline=False)
+        dm.add_field(name="Como usar", value="Vai ao painel, clica em **Registar** e usa esta chave.", inline=False)
         dm.set_footer(text="Nao partilhes a tua chave.")
         await usuario.send(embed=dm)
         embed.add_field(name="DM", value="✅ Enviado por DM", inline=False)
@@ -326,6 +426,39 @@ async def info(interaction: discord.Interaction, username: str):
     embed.add_field(name="Dias",   value=str(dias) if dias is not None else "∞", inline=True)
     embed.add_field(name="HWID",   value=f"`{row['hwid'][:16]}...`" if row["hwid"] else "Nao registado", inline=False)
     await interaction.response.send_message(embed=embed, ephemeral=True)
+
+@tree.command(name="stats", description="Estatísticas do painel", guild=discord.Object(id=GUILD_ID))
+async def stats(interaction: discord.Interaction):
+    if not is_admin(interaction):
+        await interaction.response.send_message("❌ Sem permissao.", ephemeral=True)
+        return
+    with get_db() as db:
+        total_users   = db.execute("SELECT COUNT(*) FROM users").fetchone()[0]
+        active_users  = db.execute("SELECT COUNT(*) FROM users WHERE expires_at IS NULL OR expires_at > ?",
+                                   (datetime.utcnow().isoformat(),)).fetchone()[0]
+        total_keys    = db.execute("SELECT COUNT(*) FROM keys").fetchone()[0]
+        used_keys     = db.execute("SELECT COUNT(*) FROM keys WHERE used=1").fetchone()[0]
+        open_tickets  = db.execute("SELECT COUNT(*) FROM tickets WHERE status='open'").fetchone()[0]
+    embed = discord.Embed(title="📊 Estatísticas — S Panel", color=0x7C5CBF)
+    embed.add_field(name="👥 Utilizadores",  value=f"{active_users} ativos / {total_users} total", inline=False)
+    embed.add_field(name="🔑 Keys",          value=f"{used_keys} usadas / {total_keys} total",     inline=False)
+    embed.add_field(name="🎫 Tickets abertos", value=str(open_tickets), inline=False)
+    embed.timestamp = datetime.utcnow()
+    await interaction.response.send_message(embed=embed, ephemeral=True)
+
+@tree.command(name="resetar_hwid", description="Reseta o HWID de um utilizador", guild=discord.Object(id=GUILD_ID))
+@app_commands.describe(username="Username do utilizador")
+async def resetar_hwid(interaction: discord.Interaction, username: str):
+    if not is_admin(interaction):
+        await interaction.response.send_message("❌ Sem permissao.", ephemeral=True)
+        return
+    with get_db() as db:
+        if not db.execute("SELECT id FROM users WHERE username=?", (username,)).fetchone():
+            await interaction.response.send_message(f"❌ `{username}` nao encontrado.", ephemeral=True)
+            return
+        db.execute("UPDATE users SET hwid=NULL WHERE username=?", (username,))
+        db.commit()
+    await interaction.response.send_message(f"✅ HWID de `{username}` resetado.", ephemeral=True)
 
 @bot.event
 async def on_ready():
