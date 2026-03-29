@@ -459,6 +459,7 @@ async def painel(interaction: discord.Interaction):
     await interaction.response.send_message(embed=embed, view=LojaView())
 
 
+@tree.command(name="stats", description="Estatísticas do painel", guild=discord.Object(id=GUILD_ID))
 async def stats(interaction: discord.Interaction):
     if not is_admin(interaction):
         await interaction.response.send_message("❌ Sem permissao.", ephemeral=True)
@@ -494,8 +495,11 @@ async def resetar_hwid(interaction: discord.Interaction, username: str):
 @bot.event
 async def on_ready():
     bot.add_view(LojaView())
-    await tree.sync(guild=discord.Object(id=GUILD_ID))
-    print(f"Bot online: {bot.user}")
+    try:
+        synced = await tree.sync(guild=discord.Object(id=GUILD_ID))
+        print(f"Bot online: {bot.user} | Synced {len(synced)} commands")
+    except Exception as e:
+        print(f"Sync error: {e}")
 
 threading.Thread(target=run_flask, daemon=True).start()
 bot.run(BOT_TOKEN)
