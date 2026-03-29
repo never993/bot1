@@ -441,8 +441,7 @@ async def painel(interaction: discord.Interaction):
             "⚙ **Precision** — Otimização de timer, mouse e rede\n\n"
             "**Compatível com:**\n"
             "• MSI App Player (BlueStacks)\n"
-            "• Windows 10/11 x64\n\n"
-            f"📥 **[Download]({cfg['download_url']})**"
+            "• Windows 10/11 x64"
         ),
         color=0x7C5CBF
     )
