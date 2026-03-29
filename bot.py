@@ -446,18 +446,17 @@ async def painel(interaction: discord.Interaction):
         ),
         color=0x7C5CBF
     )
-    embed.set_image(url="https://i.imgur.com/SUBSTITUA_PELA_SUA_IMAGEM.png")
-    embed.set_footer(text="S Panel • Compra na loja com /loja")
+    embed.set_image(url="https://i.imgur.com/U81DMKa.png")
+    embed.set_footer(text="S Panel • Clica num plano abaixo para comprar")
     embed.timestamp = datetime.utcnow()
 
-    # Preços
     prices = "\n".join(
         f"{p['emoji']} **{p['name']}** — {p['price']}"
         for p in cfg["products"].values()
     )
-    embed.add_field(name="💰 Preços", value=prices, inline=False)
+    embed.add_field(name="💰 Planos", value=prices, inline=False)
 
-    await interaction.response.send_message(embed=embed)
+    await interaction.response.send_message(embed=embed, view=LojaView())
 
 
 async def stats(interaction: discord.Interaction):
