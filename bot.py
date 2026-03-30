@@ -316,7 +316,7 @@ class ConfigProdutoModal(Modal, title="Configurar Produto"):
             f"✅ Produto `{pid}` atualizado: {self.emoji.value} {self.nome.value} — {self.preco.value}", ephemeral=True)
 
 # ── Comandos ──────────────────────────────────────────────────────────────────
-@tree.command(name="loja", description="Mostra o painel da loja", guild=discord.Object(id=GUILD_ID))
+@tree.command(name="loja", description="Mostra o painel da loja")
 async def loja(interaction: discord.Interaction):
     cfg = load_config()
     embed = discord.Embed(title="🛒 S Panel — Loja", color=0x7C5CBF,
@@ -326,7 +326,7 @@ async def loja(interaction: discord.Interaction):
     embed.set_footer(text="Pagamento via Pix • Key entregue após confirmação")
     await interaction.response.send_message(embed=embed, view=LojaView())
 
-@tree.command(name="config", description="Painel de configuração do bot", guild=discord.Object(id=GUILD_ID))
+@tree.command(name="config", description="Painel de configuração do bot")
 async def config_cmd(interaction: discord.Interaction):
     if not is_admin(interaction):
         await interaction.response.send_message("❌ Sem permissao.", ephemeral=True)
@@ -358,7 +358,7 @@ class ConfigView(View):
     async def edit_produto(self, interaction: discord.Interaction, button: Button):
         await interaction.response.send_modal(ConfigProdutoModal())
 
-@tree.command(name="gerar", description="Gera uma chave de acesso", guild=discord.Object(id=GUILD_ID))
+@tree.command(name="gerar", description="Gera uma chave de acesso")
 @app_commands.describe(usuario="Mencione o usuario", duracao="Duracao da chave")
 @app_commands.choices(duracao=[
     app_commands.Choice(name="1 Semana",  value="7"),
@@ -395,7 +395,7 @@ async def gerar(interaction: discord.Interaction, usuario: discord.Member, durac
         embed.add_field(name="DM", value="⚠️ Nao foi possivel enviar DM", inline=False)
     await interaction.followup.send(embed=embed, ephemeral=True)
 
-@tree.command(name="revogar", description="Revoga a licenca de um utilizador", guild=discord.Object(id=GUILD_ID))
+@tree.command(name="revogar", description="Revoga a licenca de um utilizador")
 @app_commands.describe(username="Username do utilizador")
 async def revogar(interaction: discord.Interaction, username: str):
     if not is_admin(interaction):
@@ -409,7 +409,7 @@ async def revogar(interaction: discord.Interaction, username: str):
         db.commit()
     await interaction.response.send_message(f"✅ Licenca de `{username}` revogada.", ephemeral=True)
 
-@tree.command(name="info", description="Info de um utilizador", guild=discord.Object(id=GUILD_ID))
+@tree.command(name="info", description="Info de um utilizador")
 @app_commands.describe(username="Username do utilizador")
 async def info(interaction: discord.Interaction, username: str):
     if not is_admin(interaction):
@@ -427,7 +427,7 @@ async def info(interaction: discord.Interaction, username: str):
     embed.add_field(name="HWID",   value=f"`{row['hwid'][:16]}...`" if row["hwid"] else "Nao registado", inline=False)
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
-@tree.command(name="painel", description="Mostra informações sobre o S Panel", guild=discord.Object(id=GUILD_ID))
+@tree.command(name="painel", description="Mostra informações sobre o S Panel")
 async def painel(interaction: discord.Interaction):
     cfg = load_config()
     embed = discord.Embed(
@@ -458,7 +458,7 @@ async def painel(interaction: discord.Interaction):
     await interaction.response.send_message(embed=embed, view=LojaView())
 
 
-@tree.command(name="stats", description="Estatísticas do painel", guild=discord.Object(id=GUILD_ID))
+@tree.command(name="stats", description="Estatísticas do painel")
 async def stats(interaction: discord.Interaction):
     if not is_admin(interaction):
         await interaction.response.send_message("❌ Sem permissao.", ephemeral=True)
@@ -477,7 +477,7 @@ async def stats(interaction: discord.Interaction):
     embed.timestamp = datetime.utcnow()
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
-@tree.command(name="resetar_hwid", description="Reseta o HWID de um utilizador", guild=discord.Object(id=GUILD_ID))
+@tree.command(name="resetar_hwid", description="Reseta o HWID de um utilizador")
 @app_commands.describe(username="Username do utilizador")
 async def resetar_hwid(interaction: discord.Interaction, username: str):
     if not is_admin(interaction):
@@ -495,8 +495,9 @@ async def resetar_hwid(interaction: discord.Interaction, username: str):
 async def on_ready():
     bot.add_view(LojaView())
     try:
-        synced = await tree.sync(guild=discord.Object(id=GUILD_ID))
-        print(f"Bot online: {bot.user} | Synced {len(synced)} commands")
+        # Sync global — funciona em qualquer servidor
+        synced = await tree.sync()
+        print(f"Bot online: {bot.user} | Synced {len(synced)} commands globally")
     except Exception as e:
         print(f"Sync error: {e}")
 
